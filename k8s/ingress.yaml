@@ -1,0 +1,19 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: nextjs-ingress
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+spec:
+  rules:
+  - host: nextjs.internal.example.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: nextjs-service
+            port:
+              number: 80
