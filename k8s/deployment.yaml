@@ -16,6 +16,6 @@ spec:
     spec:
       containers:
       - name: nextjs
-        image: <ACR_NAME>.azurecr.io/nextjs-basic:$(Build.BuildId)
+        image: <ACR_NAMETASK1>.azurecr.io/nextjs-basic:$(Build.BuildId)
         ports:
         - containerPort: 3000
