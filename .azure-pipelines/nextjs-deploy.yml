@@ -1,0 +1,86 @@
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  azureServiceConnection: 'my-azure-connection'
+  acrLoginServer: '<ACR_NAME>.azurecr.io'
+  imageName: 'nextjs-basic'
+  tag: '$(Build.BuildId)'
+  kubernetesCluster: 'myAKS'             # Replace with your AKS cluster name
+  kubernetesNamespace: 'production'      # Ensure the namespace exists (or create it)
+  resourceGroupName: 'MyResourceGroup'     # Replace with your RG name
+
+stages:
+- stage: Build_and_Scan
+  displayName: "Build Docker Image and Run Security Scans"
+  jobs:
+  - job: BuildImage
+    displayName: "Build, Scan, and Push Docker Image"
+    steps:
+    - checkout: self
+
+    - script: |
+        echo "Building Docker image..."
+        docker build -t $(acrLoginServer)/$(imageName):$(tag) .
+      displayName: "Docker Build"
+
+    - script: |
+        echo "Running security scan with Trivy..."
+        sudo apt-get update -y && sudo apt-get install -y wget apt-transport-https gnupg lsb-release
+        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
+        echo deb https://aquasecurity.github.io/trivy-repo/deb stable main | sudo tee -a /etc/apt/sources.list.d/trivy.list
+        sudo apt-get update -y && sudo apt-get install -y trivy
+        trivy image --exit-code 1 $(acrLoginServer)/$(imageName):$(tag) || true
+      displayName: "Docker Image Security Scan"
+
+    - script: |
+        echo "Logging into ACR and pushing image..."
+        az acr login --name <ACR_NAME>
+        docker push $(acrLoginServer)/$(imageName):$(tag)
+      displayName: "Push to ACR"
+
+- stage: Deploy_to_AKS
+  displayName: "Deploy Application to AKS"
+  dependsOn: Build_and_Scan
+  jobs:
+  - job: DeployApp
+    displayName: "Deploy Next.js App to AKS"
+    steps:
+    - task: Kubernetes@1
+      displayName: "Deploy Application (Deployment)"
+      inputs:
+        connectionType: 'Azure Resource Manager'
+        azureSubscription: '$(azureServiceConnection)'
+        azureResourceGroup: '$(resourceGroupName)'
+        kubernetesCluster: '$(kubernetesCluster)'
+        namespace: '$(kubernetesNamespace)'
+        command: 'apply'
+        useConfigurationFile: true
+        configuration: 'k8s/deployment.yaml'
+
+    - task: Kubernetes@1
+      displayName: "Apply Service Manifest"
+      inputs:
+        connectionType: 'Azure Resource Manager'
+        azureSubscription: '$(azureServiceConnection)'
+        azureResourceGroup: '$(resourceGroupName)'
+        kubernetesCluster: '$(kubernetesCluster)'
+        namespace: '$(kubernetesNamespace)'
+        command: 'apply'
+        useConfigurationFile: true
+        configuration: 'k8s/service.yaml'
+
+    - task: Kubernetes@1
+      displayName: "Apply Ingress Manifest (if required)"
+      inputs:
+        connectionType: 'Azure Resource Manager'
+        azureSubscription: '$(azureServiceConnection)'
+        azureResourceGroup: '$(resourceGroupName)'
+        kubernetesCluster: '$(kubernetesCluster)'
+        namespace: '$(kubernetesNamespace)'
+        command: 'apply'
+        useConfigurationFile: true
+        configuration: 'k8s/ingress.yaml'
